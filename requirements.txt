@@ -5,8 +5,7 @@ langchain-community
 langchain-core           
 langchain-openai         
 langchain-text-splitters 
-langsmith                 
-libmambapy              
+langsmith                          
 markdown-it-py          
 MarkupSafe             
 marshmallow               
