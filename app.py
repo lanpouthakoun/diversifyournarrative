@@ -16,7 +16,7 @@ st.set_page_config(page_title="Intertwined", page_icon="🤖")
 st.title("DON Intertwined")
 
 # Set OpenAI API Key
-os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+
 
 
 # Load preprocessed data
