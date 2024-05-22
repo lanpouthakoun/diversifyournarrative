@@ -15,8 +15,6 @@ load_dotenv()
 st.set_page_config(page_title="Intertwined", page_icon="🤖")
 st.title("DON Intertwined")
 
-# Set OpenAI API Key
-
 
 
 # Load preprocessed data
@@ -26,7 +24,7 @@ def load_preprocessed_data(text_file, faiss_file):
             with open(text_file, 'rb') as f:
                 texts = pickle.load(f)
             # Load the FAISS index
-            docsearch = FAISS.load_local(faiss_file, OpenAIEmbeddings(), allow_dangerous_deserialization=True)
+            docsearch = FAISS.load_local(faiss_file, OpenAIEmbeddings(openai_api_key=os.getenv('OPENAI_API_KEY')), allow_dangerous_deserialization=True)
             return texts, docsearch
         except (EOFError, pickle.UnpicklingError) as e:
             st.error(f"Error loading preprocessed data: {e}")
@@ -58,7 +56,7 @@ def generate_char(topic, faiss_context):
 
     prompt = ChatPromptTemplate.from_template(template)
 
-    llm = ChatOpenAI(model="gpt-4o")
+    llm = ChatOpenAI(model="gpt-4o", openai_api_key=os.getenv('OPENAI_API_KEY'))
         
     chain = prompt | llm | StrOutputParser()
     
@@ -85,7 +83,7 @@ def continueSpeaking(query, faiss_context):
     prompt = ChatPromptTemplate.from_template(template)
     context = st.session_state.chat_history
 
-    llm = ChatOpenAI(model="gpt-4o")
+    llm = ChatOpenAI(model="gpt-4o", openai_api_key=os.getenv('OPENAI_API_KEY'))
         
     chain = prompt | llm | StrOutputParser()
     
