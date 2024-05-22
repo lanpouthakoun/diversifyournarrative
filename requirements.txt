@@ -7,10 +7,7 @@ langchain-openai
 langchain-text-splitters 
 langsmith                          
 numpy                   
-openai                   
-             
-pandas                   
-           
-                
+openai                              
+pandas                                  
 PyPDF2                          
 python-dotenv                           
