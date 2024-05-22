@@ -7,7 +7,6 @@ import pickle
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.vectorstores import FAISS
-import numpy as np
 from langchain.embeddings import OpenAIEmbeddings
 
 # Load environment variables
