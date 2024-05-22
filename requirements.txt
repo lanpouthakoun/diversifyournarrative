@@ -1,7 +1,7 @@
 streamlit
 langchain_core.messages 
 langchain_openai
-from dotenv
+dotenv
 os
 pickle
 langchain_core.output_parsers
