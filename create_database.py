@@ -5,12 +5,32 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores import FAISS
 from langchain.embeddings import OpenAIEmbeddings
 from dotenv import load_dotenv
+from pinecone import Pinecone
+import streamlit as st
+from langchain_pinecone import PineconeVectorStore
+from uuid import uuid4
+
+from langchain_core.documents import Document
+
+
+api_key_ = st.secrets["PINECONE_API_KEY"]
+openai_key = st.secrets["OPENAI_API_KEY"]
+
+os.environ["OPENAI_API_KEY"] =openai_key
+
+
+
+pc = Pinecone(api_key=api_key_)
+index = pc.Index("curriculum")
+embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+
+vector_store = PineconeVectorStore(index=index, embedding=embeddings)
+
+
+
 
 # Load environment variables
-load_dotenv()
 
-# Set OpenAI API Key
-os.environ["OPENAI_API_KEY"] = os.getenv('OPENAI_API_KEY')
 
 pdf_folder = 'intertwined'
 
@@ -42,15 +62,16 @@ for filename in os.listdir(pdf_folder):
         pdf_file = os.path.join(pdf_folder, filename)
         texts.extend(extract_and_split_text(pdf_file))
 
-# Create embeddings and initialize FAISS vector store
-embeddings = OpenAIEmbeddings()
-docsearch = FAISS.from_texts(texts, embeddings)
+docs = []
+for text in texts:
+    temp = Document(
+        page_content = text
+    )
+    vector_store.add_documents([temp])
 
-# Save the text data using pickle
-with open('preprocessed_texts.pkl', 'wb') as f:
-    pickle.dump(texts, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-# Save the FAISS index separately
-docsearch.save_local('faiss_index')
+
+
+
 
 print("Data preprocessed and saved successfully.")

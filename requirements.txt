@@ -1,13 +1,13 @@
 
-faiss-cpu                
 langchain                
 langchain-community      
 langchain-core           
 langchain-openai         
 langchain-text-splitters 
-langsmith                          
+langchain-pinecone                          
 numpy                   
 openai                              
 pandas                                  
 PyPDF2                          
-python-dotenv                           
+python-dotenv         
+streamlit                  

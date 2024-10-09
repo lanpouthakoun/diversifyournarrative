@@ -1,143 +1,162 @@
 import streamlit as st
-from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 import os
-import pickle
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain.vectorstores import FAISS
 from langchain.embeddings import OpenAIEmbeddings
+from pinecone import Pinecone
+from langchain_pinecone import PineconeVectorStore
+from langchain_core.runnables import (
+    RunnablePassthrough,
+)
+
+
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain.chains import create_history_aware_retriever
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, AIMessage
+
+from langchain_community.chat_message_histories import (
+    StreamlitChatMessageHistory,
+)
+
+
 
 # Load environment variables
 load_dotenv()
 # Streamlit app configuration
 st.set_page_config(page_title="Intertwined", page_icon="🤖")
 st.title("DON Intertwined")
+api_key_ = st.secrets["PINECONE_API_KEY"]
+openai_key = st.secrets["OPENAI_API_KEY"]
 
-
-
-# Load preprocessed data
-def load_preprocessed_data(text_file, faiss_file):
-    if os.path.exists(text_file) and os.path.exists(faiss_file):
-        try:
-            with open(text_file, 'rb') as f:
-                texts = pickle.load(f)
-            # Load the FAISS index
-            docsearch = FAISS.load_local(faiss_file, OpenAIEmbeddings(openai_api_key=os.getenv('OPENAI_API_KEY')), allow_dangerous_deserialization=True)
-            return texts, docsearch
-        except (EOFError, pickle.UnpicklingError) as e:
-            st.error(f"Error loading preprocessed data: {e}")
-            return [], None
-    else:
-        st.error("Preprocessed data file does not exist.")
-        return [], None
-
-texts, docsearch = load_preprocessed_data('preprocessed_texts.pkl', 'faiss_index')
-
-# Function to get context from FAISS
-def get_context_from_faiss(query):
-    search_results = docsearch.similarity_search(query, k= 5)
-    if search_results:
-        return search_results[0].page_content
-    else:
-        return "Sorry, I don't have information on that topic."
+os.environ["OPENAI_API_KEY"] =openai_key
 
 
 
 
-def generate_char(topic, faiss_context):
+pc = Pinecone(api_key=api_key_)
+index = pc.Index("curriculum")
+embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+
+vector_store = PineconeVectorStore(index=index, embedding=embeddings)
+
+
+history = []
+llm = ChatOpenAI(model = 'gpt-4o')
+# # Load preprocessed data
+
+
+def generate_char(topic):
     template = """
-    {topic}, this is the topic of financial literacy the user would like to more about. 
-    Generate three unique characters who are experts in this subject. Make sure that they are possibly real people who have real experiences.
-    Make sure to create characters for the user, DO NOT let the user create one themselves. 
-    Here is some context to draw from: {faiss_context} .
-    """
+{topic}
+
+Generate three unique characters who are experts in this topic. These characters should be realistic, based on people with genuine experiences in the field. The user would like you to create these characters based on the topic they select, so do not prompt the user to create them. Use relevant context, such as {context}, to ensure the characters are well-informed and relatable.
+"""
 
     prompt = ChatPromptTemplate.from_template(template)
 
-    llm = ChatOpenAI(model="gpt-4o", openai_api_key=os.getenv('OPENAI_API_KEY'))
-        
-    chain = prompt | llm | StrOutputParser()
-    
-    return chain.stream({
-        "faiss_context": faiss_context,
-        "topic": topic,
-    })
+    retriever = vector_store.as_retriever(
+    search_type="similarity_score_threshold",
+    search_kwargs={"k": 3, "score_threshold": 0.5},
+    )
 
-def continueSpeaking(query, faiss_context):
+    chain = (
+        {"context": retriever, "topic": RunnablePassthrough()}
+        | prompt
+        | llm
+        | StrOutputParser()
+    )
+    
+    return chain.invoke(topic)
+
+
+
+def continueSpeaking(query):
     template = """
-    Pretend to be the character chosen by the user and bring examples from this fictional character's life into your explanations. For example, use stories from your life to show real moments of this subject.
-    The goal is to teach the user about financial literacy by telling the story of a character
-    and prompting the user to ask further questions to do a narrative-based learning approach. Answer the everything considering the history of the conversation and the given context:
 
-    Chat history: {chat_history}
 
-    Context : {faiss_context}
+Chat history: {chat_history}
 
-    User question: {user_question}
+Context: {faiss_context}
 
-    Be brief in your responses, and impersonate the character you are chosen to be. Use a bulk of your information from the given context.
-    """
+User question: {user_question}
 
-    prompt = ChatPromptTemplate.from_template(template)
-    context = st.session_state.chat_history
+Keep your responses brief, impersonate the chosen character, and primarily draw from the given context.
+"""
+    retriever = vector_store.as_retriever(
+    search_type="similarity_score_threshold",
+    search_kwargs={"k": 3, "score_threshold": 0.5},
+    )
+    contextualize_q_system_prompt = """Pretend to be the character chosen by the user and incorporate examples from this fictional character's life into your explanations. Use personal stories to illustrate real moments related to the topic. The goal is to teach the user about financial literacy through a narrative-based learning approach, where you, as the character, tell your story and encourage the user to ask more questions.
 
-    llm = ChatOpenAI(model="gpt-4o", openai_api_key=os.getenv('OPENAI_API_KEY'))
-        
-    chain = prompt | llm | StrOutputParser()
+Respond based on the history of the conversation and the provided context.
+Keep your responses brief, impersonate the chosen character, and primarily draw from the given context."""
+    contextualize_q_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", contextualize_q_system_prompt),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}"),
+        ]
+    )
     
-    return chain.stream({
-        "chat_history": context,
-        "faiss_context": faiss_context,
-        "user_question": query,
-    })
+    history_aware_retriever = create_history_aware_retriever(
+        llm, retriever, contextualize_q_prompt
+    )
+    qa_system_prompt = """Pretend to be the character chosen by the user and incorporate examples from this fictional character's life into your explanations. Use personal stories to illustrate real moments related to the topic. The goal is to teach the user about financial literacy through a narrative-based learning approach, where you, as the character, tell your story and encourage the user to ask more questions.
+
+Respond based on the history of the conversation and the provided context.
+
+    {context}
+    Keep your responses brief, impersonate the chosen character, and primarily draw from the given context."""
+    qa_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", qa_system_prompt),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}"),
+        ]
+    )
+
+
+    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+
+    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+    msg = rag_chain.invoke({"input": query, "chat_history": msgs.messages})
+
+    history.extend([HumanMessage(content=query), msg["answer"]])
+
+    return msg["answer"]
 
     
 
 
-# Initialize session state
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = [
-        AIMessage(content="Hello, I am a bot looking to help you learn financial literacy! What topic would you like to focus on?"),
-    ]
+msgs = StreamlitChatMessageHistory(key="special_app_key")
+
+if len(msgs.messages) == 0:
+    msgs.add_ai_message("Hello, I am a bot looking to help you learn financial literacy! What topic would you like to focus on?")
     st.session_state.step = "get_topic"
 
 
     
 # conversation
-for message in st.session_state.chat_history:
-    if isinstance(message, AIMessage):
-        with st.chat_message("AI"):
-            st.write(message.content)
-    elif isinstance(message, HumanMessage):
-        with st.chat_message("Human"):
-            st.write(message.content)
+for msg in msgs.messages:
+    st.chat_message(msg.type).write(msg.content)
 
-# user input
-user_query = st.chat_input("Type your message here...")
-if user_query is not None and user_query != "":
+if prompt := st.chat_input("Type your message here..."):
     if st.session_state.step == "get_topic":
-        
-        with st.chat_message("Human"):
-            st.markdown(user_query)
+        st.chat_message("human").write(prompt)
 
-        context = get_context_from_faiss(user_query)
-        
-        st.session_state.chat_history.append(HumanMessage(content=user_query))
+        # As usual, new messages are added to StreamlitChatMessageHistory when the Chain is called.
+        config = {"configurable": {"session_id": "any"}}
+        st.chat_message("ai").write(generate_char(prompt))
+        st.session_state.step = "no longer topic"
+    
+    elif st.session_state.step == "no longer topic":
 
-        with st.chat_message("AI"):
-            response = st.write_stream(generate_char(user_query, context))
-        st.session_state.chat_history.append(AIMessage(content=response))
-        st.session_state.step = "talk"
-    else:
+        st.chat_message("human").write(prompt)
 
-        st.session_state.chat_history.append(HumanMessage(content=user_query))
+        # As usual, new messages are added to StreamlitChatMessageHistory when the Chain is called.
+        config = {"configurable": {"session_id": "any"}}
+        st.chat_message("ai").write(continueSpeaking(prompt))
 
-        with st.chat_message("Human"):
-            st.markdown(user_query)
-        context = get_context_from_faiss(user_query)
-        with st.chat_message("AI"):
-            response = st.write_stream(continueSpeaking(user_query, context))
-
-        st.session_state.chat_history.append(AIMessage(content=response))
